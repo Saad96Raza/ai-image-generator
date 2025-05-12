@@ -1,58 +1,76 @@
-from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler 
+from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 import torch
-import os
+import gc
 from safetensors.torch import load_file
+from google.colab import drive
+from huggingface_hub import login
+
+drive.mount('/content/drive')
 
 
-model_name = "SG161222/Realistic_Vision_V6.0_B1_noVAE"
+model_name = "SG161222/Realistic_Vision_V5.1_noVAE"
 
+if(torch.cuda.is_available()):
 
-pipe = StableDiffusionPipeline.from_pretrained(
-    model_name, 
-    torch_dtype=torch.float16,
-    safety_checker=None
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        safety_checker = None
     ).to("cuda")
-pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)  
 
-lora_path = '/content/drive/MyDrive/loras/photorealistic_facial_details_v1.safetensors'
 
-if os.path.exists(lora_path):
-    lora_state_dict = load_file(lora_path, device="cuda")
-    
-    for layer in pipe.unet.attn_processors:
-        pipe.unet.attn_processors[layer] = lora_state_dict
 
-    pipe.fuse_lora(lora_scale=0.7)
-    print("LoRA loaded and fused successfully.")
+    pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", final_sigmas_type="sigma_min")
+
+
+    prompt = (
+         "1 girl,  Sexy 18 year old girl ,  braids,  beautiful face, nice,  beautiful,  beautiful,  beautiful face,hair band"
+         "blue-white skin, parts, Blonde, blue eyes, Perfect, glowing lips ,  Big Lips,  Thick lips,   half-open lips  ,uncensored,fullbody,"
+         "Light Pink Lip Gloss  ,  skinny thighs, petite body, ,  skinny,  flat chest,  skinny,  body(body heigth:), Big Head,"
+         "Innocent Looks  , Young Face, long pink nails,  choker, Legs and High Heels HD ,  Micro Plaid Skirt  ,   white tank top with shoulders out ,"
+         "White Tight Gather Socks ,  BLACK PATENT LEATHER HIGH HEELS ,  sweaty ,  On your knees　In the bedroom　 Candles and Soft Warm Light . ( look up at the viewer ), "
+         " The color of the room is pink and white ,   perfect eyes ,  very  detailed eyes,   beautiful and expressive  ,   detailed eyes , 35mm Photography, movie, Bokeh,"
+         " professional, 4K,  high definition dynamic lighting,  photorealistic, 8k, born, Rico,    Intricate Details , naked,  topless"
+
+    )
+
+
+    negative_prompt = (
+        "blurry, low quality, bad anatomy, deformed, unrealistic body proportions, multiple models, duplicated subject, twin, clone, extra face,extra hair,extra body part,"
+        "extra limbs, extra fingers, fused fingers, mutated hands, bad hands, broken joints, twisted body, misaligned limbs, distorted fingers, "
+        "extra clothes, misplaced clothing, misaligned clothing, unnatural clothing, unaligned body, missing body parts, weird posture,extra body structure "
+        "unnatural skin texture, overexposed, underexposed, noisy, low resolution, artifacts, watermark, logo, text, signature, "
+        "cartoon, CGI, 3D render, painting, drawing, sketch, unrealistic, poorly drawn, bad shading, shadows in wrong place"
+    )
+
+
+    # Face Portrait: 896x896
+    # Portrait: 896x896, 768x1024
+    # Half Body: 768x1024, 640x1152
+    # Full Body: 896x896, 768x1024, 640x1152, 1024x768, 1152x640
+
+    pipe.enable_attention_slicing()
+    for i in range(4):
+      image = pipe(
+          prompt,
+          negative_prompt=negative_prompt,
+          guidance_scale=8,
+          width=640,
+          height=1152,
+          num_inference_steps= 40,
+          seed = 42,
+      ).images[0]
+      image.save(f"/content/drive/MyDrive/output{i+1}.png")
+
+
+
 else:
-    print(f"LoRA file not found at {lora_path}")
-
-pipe.num_inference_steps = 40  
-
-prompt = (
-    "masterpiece, best quality, 8k, RAW photo, DSLR, ultra-realistic portrait of a stunning young brunette woman outdoor,sharp detailed eyes"
-    "wearing a red skirt and topless, natural soft lighting, smooth skin with fine pores,well-fitted clothes, properly aligned clothing, realistic proportions"
-    "subtle expression, soft shadows, ambient cinematic light, depth of field, single model, only one woman, no duplicates"
-    "bokeh, symmetrical face, sharp eyes, detailed hair strands, "
-    "shot with Canon EOS 5D Mark IV, 85mm f/1.4 lens"
-)
-negative_prompt = (
-    "blurry, low quality, deformed, bad anatomy, unrealistic body proportions, multiple model"
-    "extra limbs, extra fingers, fused fingers, mutated hands, bad hands, twisted body"
-    "extra clothes, misplaced clothes, unnatural clothing, unnatural skin texture, "
-    "mutated, noisy, overexposed, underexposed, cartoon, CGI, painting, sketch, "
-    "unrealistic, poorly drawn, distorted body, watermark, text, logo"
-)
+  print('GPU is not available')
 
 
-image = pipe(
-    prompt,
-    negative_prompt=negative_prompt,
-    guidance_scale=7,
-    width=1800 ,     # <-- add width
-    height=1800       # <-- add height
-).images[0]  # Set guidance_scale here
 
-image.show()
 
-image.save("/content/drive/MyDrive/output.png")
+
+
+
+
